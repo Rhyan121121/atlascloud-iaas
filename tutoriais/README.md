@@ -200,12 +200,10 @@ O modelo **Gemini (Google)** foi utilizado como ferramenta de apoio para geraç�
 
 ---
 
-## 9. Links do Repositório Git e Vídeo de Reserva (Plano B)
+## 9. Links do Repositório Git
 
 * **Repositório GitHub (com tags `etapa-1-rest`, `etapa-2-mensageria`, `etapa-3-graphql`, `etapa-4-gateway`, `entrega-final`):**  
   https://github.com/Rhyan121121/atlascloud-iaas
-* **Vídeo de Reserva da Demonstração (Plano B — Seção 6):**  
-  https://github.com/Rhyan121121/atlascloud-iaas/releases/tag/entrega-final *(e execução 100% reproduzível offline via `./testes/executar_todas_as_cenas.sh`)*
 
 ---
 
