@@ -1,0 +1,54 @@
+# Binarios locais e ferramentas auxiliares
+.bin/
+bin/
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+atlas-gateway
+atlas-compute
+atlas-security
+atlas-billing
+atlas-workers
+atlas-graphql
+
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+*.tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Variaveis de ambiente e segredos
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Logs e arquivos temporarios
+*.log
+/testes/*.log
+/tmp/
+.pids/
+.logs/
+.docker/
+
+# IDE e editores
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store

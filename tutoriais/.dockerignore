@@ -1,0 +1,9 @@
+.bin/
+bin/
+dist/
+.git/
+.docker/
+.pids/
+.logs/
+*.tar.gz
+*.log

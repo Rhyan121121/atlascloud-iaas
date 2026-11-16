@@ -1,0 +1,394 @@
+openapi: 3.1.0
+info:
+  title: AtlasCloud IaaS API
+  version: 1.0.0
+  description: >
+    Plataforma de computação em nuvem estilo AWS EC2/VPC com orquestração declarativa,
+    RFC 9457 Problem Details, mensageria RabbitMQ 4 com DLQ, GraphQL BFF e API Gateway resiliente.
+    Projeto prático de Engenharia de Software / Modelagem de Padrões de Projeto (Fatec Araraquara, ADS, 2026).
+servers:
+  - url: http://localhost:8080
+    description: AtlasCloud API Gateway (Ponto Único Exposto)
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Chave de API ('cli-terraform' para automação ou 'console-web' para console).
+    RequestIdHeader:
+      type: apiKey
+      in: header
+      name: X-Request-Id
+      description: Identificador único de correlação para rastreabilidade ponta a ponta.
+
+  schemas:
+    ProblemDetails:
+      type: object
+      description: Representação padrão de erros da RFC 9457 (Problem Details for HTTP APIs)
+      required:
+        - type
+        - title
+        - status
+        - detail
+        - timestamp
+      properties:
+        type:
+          type: string
+          format: uri
+          example: https://atlascloud.io/errors/quota-exceeded
+        title:
+          type: string
+          example: Cota de vCPUs Excedida
+        status:
+          type: integer
+          example: 422
+        detail:
+          type: string
+          example: A criação da instância violaria a cota máxima permitida de 8 vCPUs para esta conta.
+        instance:
+          type: string
+          example: /v1/instances
+        request_id:
+          type: string
+          example: 018f3a5e-1234-7abc-9def-1234567890ab
+        timestamp:
+          type: string
+          format: date-time
+        invalid_params:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              reason:
+                type: string
+
+    Instance:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        flavor:
+          type: string
+          enum: [t3.micro, c5.large]
+        status:
+          type: string
+          enum: [PROVISIONING, RUNNING, STOPPED, TERMINATED]
+        ip_privado:
+          type: string
+        ip_publico:
+          type: string
+        vpc_id:
+          type: string
+        security_group_id:
+          type: string
+        account_id:
+          type: string
+        vcpus:
+          type: integer
+        memory_gb:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    SecurityGroup:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        vpc_id:
+          type: string
+        account_id:
+          type: string
+        rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/FirewallRule'
+
+    FirewallRule:
+      type: object
+      properties:
+        id:
+          type: string
+        protocol:
+          type: string
+          enum: [TCP, UDP, ICMP]
+        start_port:
+          type: integer
+        end_port:
+          type: integer
+        cidr_origin:
+          type: string
+
+    Budget:
+      type: object
+      properties:
+        account_id:
+          type: string
+        current_cost:
+          type: number
+        budget_limit:
+          type: number
+        currency:
+          type: string
+        exceeded:
+          type: boolean
+        forecasted_cost:
+          type: number
+
+paths:
+  /v1/instances:
+    get:
+      summary: Listar instâncias virtuais com paginação e filtros
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: flavor
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: Lista paginada de instâncias
+        '401':
+          description: Não autorizado (RFC 9457)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Taxa limite excedida
+    post:
+      summary: Criar nova instância virtual
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, flavor, vpc_id, security_group_id]
+              properties:
+                name:
+                  type: string
+                flavor:
+                  type: string
+                  enum: [t3.micro, c5.large]
+                vpc_id:
+                  type: string
+                security_group_id:
+                  type: string
+                account_id:
+                  type: string
+      responses:
+        '201':
+          description: Instância criada com sucesso
+          headers:
+            Location:
+              schema:
+                type: string
+        '409':
+          description: Conflito de nome duplicado na VPC (RFC 9457)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: Cota de vCPUs excedida ou parâmetro inválido (RFC 9457)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /v1/instances/{id}:
+    get:
+      summary: Obter detalhes da instância
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Detalhes da instância
+        '404':
+          description: Instância não encontrada (RFC 9457)
+    patch:
+      summary: Alterar status ou atributos da instância
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [RUNNING, STOPPED, TERMINATED]
+                flavor:
+                  type: string
+                name:
+                  type: string
+      responses:
+        '200':
+          description: Instância atualizada
+        '422':
+          description: Não é permitido alterar flavor em estado RUNNING (RFC 9457)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+    delete:
+      summary: Terminar e desalocar instância virtual
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Instância terminada com sucesso
+
+  /v1/security-groups:
+    get:
+      summary: Listar Security Groups
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Lista de Security Groups
+    post:
+      summary: Criar Security Group e regras de firewall
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, vpc_id, rules]
+              properties:
+                name:
+                  type: string
+                vpc_id:
+                  type: string
+                rules:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/FirewallRule'
+      responses:
+        '201':
+          description: Security Group criado
+        '422':
+          description: Intervalo de portas inválido (RFC 9457)
+
+  /v1/security-groups/{id}:
+    delete:
+      summary: Excluir Security Group
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Excluído com sucesso
+        '409':
+          description: Conflito de dependência com instâncias ativas (RFC 9457)
+
+  /v1/budgets/{accountId}:
+    get:
+      summary: Consultar fatura, custo acumulado e status do orçamento
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Informações de faturamento
+
+  /api/v1/dashboard/{accountId}:
+    get:
+      summary: Rota Agregada do Dashboard com Degradação Graciosa
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Payload consolidado contendo instâncias, security groups e faturamento
+
+  /graphql:
+    post:
+      summary: Endpoint GraphQL BFF Unificado
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query:
+                  type: string
+                variables:
+                  type: object
+      responses:
+        '200':
+          description: Resultado da consulta GraphQL
