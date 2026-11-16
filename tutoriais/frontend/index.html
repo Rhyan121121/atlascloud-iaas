@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AtlasCloud Management Console - IaaS</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            aws: {
+              squid: '#161e2e',
+              deep: '#0f172a',
+              card: '#1e293b',
+              orange: '#ff9900',
+              accent: '#3b82f6',
+              border: '#334155'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    .pulse-dot { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col">
+
+  <!-- Top Navigation Bar (AWS Style) -->
+  <header class="bg-slate-900 border-b border-slate-800 sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex justify-between h-14 items-center">
+      <div class="flex items-center space-x-3">
+        <div class="w-8 h-8 rounded bg-gradient-to-tr from-amber-500 to-orange-600 flex items-center justify-center font-black text-white text-lg tracking-wider">
+          A
+        </div>
+        <div>
+          <span class="font-bold text-lg tracking-tight text-white">AtlasCloud</span>
+          <span class="text-xs text-orange-400 font-semibold px-2 py-0.5 ml-2 bg-orange-950/60 rounded border border-orange-800/40">IaaS Console</span>
+        </div>
+      </div>
+
+      <div class="flex items-center space-x-4 text-xs">
+        <div class="flex items-center space-x-2 bg-slate-800/80 px-3 py-1.5 rounded-md border border-slate-700">
+          <span class="inline-block w-2 h-2 rounded-full bg-emerald-400 pulse-dot"></span>
+          <span class="text-slate-300">Região: <strong class="text-white">sa-east-1 (Fatec Araraquara)</strong></span>
+        </div>
+        <div class="bg-slate-800/80 px-3 py-1.5 rounded-md border border-slate-700">
+          <span class="text-slate-300">Conta: <strong class="text-white" id="account-badge">acc-fatec-01</strong></span>
+        </div>
+        <div class="bg-slate-800/80 px-3 py-1.5 rounded-md border border-slate-700">
+          <span class="text-slate-400">API Key: <code class="text-amber-400 font-mono">console-web</code></span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+
+    <!-- Toast / Notification Alert Banner (Budget Overflow) -->
+    <div id="budget-alert-banner" class="hidden transition-all duration-300 bg-red-950/80 border-2 border-red-500 text-red-200 px-5 py-4 rounded-xl flex items-center justify-between shadow-xl shadow-red-950/50">
+      <div class="flex items-center space-x-3">
+        <span class="text-2xl">⚠️</span>
+        <div>
+          <h4 class="font-bold text-red-100 text-sm">ALERTA CRÍTICO DE FATURAMENTO: Limite Contratual Excedido!</h4>
+          <p class="text-xs text-red-300">O custo acumulado ultrapassou o teto de <strong id="alert-limit-val">$ 100.00</strong>. Evento assíncrono <code class="bg-red-900/60 px-1 py-0.5 rounded text-red-100 font-mono">billing.budget.exceeded</code> publicado no RabbitMQ.</p>
+        </div>
+      </div>
+      <button onclick="dismissAlert()" class="text-red-400 hover:text-white text-sm font-semibold px-3 py-1 rounded bg-red-900/40 hover:bg-red-800 transition">Fechar</button>
+    </div>
+
+    <!-- KPI Summary Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <!-- Total Instances -->
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow">
+        <div class="text-xs font-semibold uppercase tracking-wider text-slate-400">Instâncias EC2</div>
+        <div class="mt-2 flex items-baseline justify-between">
+          <div class="text-3xl font-extrabold text-white" id="kpi-instances-count">0</div>
+          <span class="text-xs font-medium text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/40" id="kpi-running-badge">0 Ativas</span>
+        </div>
+        <div class="mt-2 text-xs text-slate-500">Capacidade alocada no cluster</div>
+      </div>
+
+      <!-- vCPU Quota -->
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow">
+        <div class="text-xs font-semibold uppercase tracking-wider text-slate-400">Cota de vCPUs</div>
+        <div class="mt-2 flex items-baseline justify-between">
+          <div class="text-3xl font-extrabold text-white" id="kpi-vcpus-count">0 <span class="text-sm font-normal text-slate-400">/ 8</span></div>
+          <span class="text-xs font-medium text-amber-400" id="kpi-vcpus-pct">0%</span>
+        </div>
+        <div class="w-full bg-slate-800 rounded-full h-1.5 mt-3 overflow-hidden">
+          <div id="kpi-vcpu-bar" class="bg-amber-500 h-1.5 rounded-full transition-all duration-500" style="width: 0%"></div>
+        </div>
+      </div>
+
+      <!-- Security Groups -->
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow">
+        <div class="text-xs font-semibold uppercase tracking-wider text-slate-400">Security Groups</div>
+        <div class="mt-2 flex items-baseline justify-between">
+          <div class="text-3xl font-extrabold text-white" id="kpi-sgs-count">0</div>
+          <span class="text-xs font-medium text-blue-400 bg-blue-950/60 px-2 py-0.5 rounded border border-blue-800/40">Firewall VPC</span>
+        </div>
+        <div class="mt-2 text-xs text-slate-500">Regras ativas de portas/CIDR</div>
+      </div>
+
+      <!-- Billing Gauge -->
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow" id="card-billing">
+        <div class="flex justify-between items-center">
+          <div class="text-xs font-semibold uppercase tracking-wider text-slate-400">Fatura em Tempo Real</div>
+          <span class="text-[10px] font-mono text-slate-400" id="last-updated-tag">Agora</span>
+        </div>
+        <div class="mt-2 flex items-baseline justify-between">
+          <div class="text-3xl font-extrabold text-white" id="kpi-cost">$ 0.00</div>
+          <span class="text-xs font-medium text-slate-400">Teto: <span class="text-white" id="kpi-limit">$ 100.00</span></span>
+        </div>
+        <div class="w-full bg-slate-800 rounded-full h-2 mt-3 overflow-hidden">
+          <div id="budget-progress-bar" class="bg-emerald-500 h-2 rounded-full transition-all duration-500" style="width: 0%"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Controls & Actions Toolbar -->
+    <div class="flex flex-wrap items-center justify-between gap-4 bg-slate-900/60 border border-slate-800 p-4 rounded-xl">
+      <div class="flex items-center space-x-3">
+        <!-- View Mode Switcher -->
+        <span class="text-xs font-semibold text-slate-400">Modo de Consulta:</span>
+        <div class="inline-flex rounded-lg bg-slate-800 p-1 border border-slate-700">
+          <button id="btn-mode-rest" onclick="switchMode('REST')" class="px-3 py-1 text-xs font-semibold rounded-md bg-amber-500 text-slate-950 transition">
+            REST Aggregated
+          </button>
+          <button id="btn-mode-graphql" onclick="switchMode('GRAPHQL')" class="px-3 py-1 text-xs font-semibold rounded-md text-slate-300 hover:text-white transition">
+            GraphQL BFF
+          </button>
+        </div>
+        <span class="text-xs text-slate-500" id="mode-desc">Rota GET /api/v1/dashboard/acc-fatec-01 com degradação graciosa</span>
+      </div>
+
+      <div class="flex items-center space-x-2">
+        <button onclick="refreshData()" class="flex items-center space-x-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 rounded-lg border border-slate-700 transition">
+          <span>🔄</span>
+          <span>Atualizar</span>
+        </button>
+        <button onclick="handleResetBudget()" title="Zerar valores simulados e recalcular consumo real" class="flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-950/70 hover:bg-emerald-900 text-xs font-semibold text-emerald-200 rounded-lg border border-emerald-800/60 transition">
+          <span>💰</span>
+          <span>Zerar Fatura</span>
+        </button>
+        <button onclick="openSimulateModal()" class="flex items-center space-x-1.5 px-3 py-1.5 bg-red-950/60 hover:bg-red-900 text-xs font-semibold text-red-200 rounded-lg border border-red-800/60 transition">
+          <span>⚡</span>
+          <span>Injetar Custo (Cena 7)</span>
+        </button>
+        <button onclick="handlePurgeTerminated()" title="Remover todas as instâncias terminadas da tabela" class="flex items-center space-x-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 rounded-lg border border-slate-700 transition">
+          <span>🧹</span>
+          <span>Limpar Terminadas</span>
+        </button>
+        <button onclick="openLaunchModal()" class="flex items-center space-x-1.5 px-4 py-1.5 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-xs font-bold text-slate-950 rounded-lg shadow transition">
+          <span>➕</span>
+          <span>Lançar Instância</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Instances Table -->
+    <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow">
+      <div class="px-5 py-4 border-b border-slate-800 flex flex-wrap justify-between items-center gap-2">
+        <div>
+          <h3 class="font-bold text-white text-sm">Instâncias Virtuais (EC2)</h3>
+          <p class="text-xs text-slate-400">Ciclo de vida, IPs públicos e grupos de segurança vinculados</p>
+        </div>
+        <div class="flex items-center space-x-4">
+          <label class="flex items-center space-x-1.5 text-xs text-slate-300 cursor-pointer">
+            <input type="checkbox" id="chk-hide-terminated" onchange="toggleHideTerminated(this)" class="rounded bg-slate-800 border-slate-700 text-amber-500 focus:ring-0">
+            <span>Ocultar Terminadas</span>
+          </label>
+          <div class="text-xs font-mono text-slate-400">
+            X-Request-Id: <span class="text-slate-300" id="current-request-id">-</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs">
+          <thead class="bg-slate-950/50 text-slate-400 uppercase tracking-wider border-b border-slate-800">
+            <tr>
+              <th class="px-5 py-3">Nome / ID</th>
+              <th class="px-5 py-3">Status</th>
+              <th class="px-5 py-3">Flavor</th>
+              <th class="px-5 py-3">vCPUs / RAM</th>
+              <th class="px-5 py-3">IP Privado</th>
+              <th class="px-5 py-3">IP Público</th>
+              <th class="px-5 py-3">Security Group</th>
+              <th class="px-5 py-3 text-right">Ações</th>
+            </tr>
+          </thead>
+          <tbody id="instances-tbody" class="divide-y divide-slate-800/60">
+            <tr>
+              <td colspan="8" class="text-center py-8 text-slate-500">Carregando instâncias...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Security Groups Accordion / Table -->
+    <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow">
+      <div class="px-5 py-4 border-b border-slate-800">
+        <h3 class="font-bold text-white text-sm">Security Groups & Regras de Firewall</h3>
+        <p class="text-xs text-slate-400">Políticas de ingresso e controle de portas TCP/UDP/ICMP</p>
+      </div>
+      <div id="sg-container" class="p-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+        <!-- Renderizado dinamicamente -->
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Modal Lançar Instância -->
+  <div id="launch-modal" class="fixed inset-0 bg-black/75 z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+      <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+        <h3 class="font-bold text-base text-white">Lançar Nova Instância Virtual</h3>
+        <button onclick="closeLaunchModal()" class="text-slate-400 hover:text-white text-lg">&times;</button>
+      </div>
+
+      <form id="launch-form" onsubmit="handleLaunchInstance(event)" class="space-y-4 text-xs">
+        <div>
+          <label class="block font-semibold text-slate-300 mb-1">Nome da Instância</label>
+          <input type="text" id="inst-name" required placeholder="ex: web-frontend-01" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-amber-500">
+        </div>
+
+        <div>
+          <label class="block font-semibold text-slate-300 mb-1">Tipo de Máquina (Flavor)</label>
+          <select id="inst-flavor" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-amber-500">
+            <option value="t3.micro">t3.micro (1 vCPU, 1 GB RAM, $ 0.02/h)</option>
+            <option value="c5.large">c5.large (2 vCPUs, 4 GB RAM, $ 0.10/h)</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block font-semibold text-slate-300 mb-1">VPC ID</label>
+          <input type="text" id="inst-vpc" required value="vpc-dev-01" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-amber-500">
+        </div>
+
+        <div>
+          <label class="block font-semibold text-slate-300 mb-1">Security Group</label>
+          <select id="inst-sg" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-amber-500">
+            <!-- Preenchido via JS -->
+          </select>
+        </div>
+
+        <div id="launch-error" class="hidden p-3 rounded-lg bg-red-950/80 border border-red-700 text-red-200 text-xs"></div>
+
+        <div class="flex justify-end space-x-3 pt-2">
+          <button type="button" onclick="closeLaunchModal()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg">Cancelar</button>
+          <button type="submit" class="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg transition">Criar Instância</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal Injetar Custo (Cena 7) -->
+  <div id="simulate-modal" class="fixed inset-0 bg-black/75 z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-700 rounded-2xl max-w-sm w-full p-6 shadow-2xl space-y-4">
+      <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+        <h3 class="font-bold text-base text-white">⚡ Injetar Consumo (Teste Cena 7)</h3>
+        <button onclick="closeSimulateModal()" class="text-slate-400 hover:text-white text-lg">&times;</button>
+      </div>
+
+      <p class="text-xs text-slate-400">
+        Simula faturamento de transferência de rede ou instâncias extras para forçar a ultrapassagem do teto de <strong>$ 100.00</strong> e disparar o evento no RabbitMQ.
+      </p>
+
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="block font-semibold text-slate-300 mb-1">Valor Adicional (USD)</label>
+          <input type="number" id="sim-amount" value="105.00" step="1.00" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-red-500">
+        </div>
+        <div class="flex justify-end space-x-3 pt-2">
+          <button type="button" onclick="closeSimulateModal()" class="px-4 py-2 bg-slate-800 text-slate-300 rounded-lg">Cancelar</button>
+          <button type="button" onclick="handleSimulateCharge()" class="px-4 py-2 bg-red-600 hover:bg-red-500 text-white font-bold rounded-lg transition">Disparar Alerta</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer class="bg-slate-950 border-t border-slate-800/80 py-4 text-center text-xs text-slate-500">
+    AtlasCloud IaaS &bull; Engenharia de Software / Modelagem de Padrões de Projeto (Fatec Araraquara, ADS, 2026) &bull; Grupo 6
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

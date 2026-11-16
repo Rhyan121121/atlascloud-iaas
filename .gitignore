@@ -52,3 +52,4 @@ override.tf.json
 *.swo
 *~
 .DS_Store
+grupo-06-atlascloud-iaas.zip
